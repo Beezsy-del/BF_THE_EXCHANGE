@@ -30,6 +30,7 @@ function highlightLine(line) {
 
 export default function CodeEditor({ value, onChange, errorLine }) {
   const taRef = useRef(null)
+  const escapeTab = useRef(false)
   const hlRef = useRef(null)
   const gutRef = useRef(null)
   const lines = value.split('\n')
@@ -47,6 +48,9 @@ export default function CodeEditor({ value, onChange, errorLine }) {
   }
 
   const onKeyDown = (e) => {
+    if (e.key === 'Escape') { escapeTab.current = true; e.stopPropagation(); return }
+    if (e.key === 'Tab' && (e.shiftKey || escapeTab.current)) { escapeTab.current = false; return }
+    escapeTab.current = false
     if (e.key === 'Tab') {
       e.preventDefault()
       const ta = e.target
@@ -78,6 +82,7 @@ export default function CodeEditor({ value, onChange, errorLine }) {
           onScroll={sync}
           onKeyDown={onKeyDown}
           aria-label="Drawing program"
+          title="Tab indents. Shift+Tab or Escape then Tab moves focus out."
         />
       </div>
     </div>

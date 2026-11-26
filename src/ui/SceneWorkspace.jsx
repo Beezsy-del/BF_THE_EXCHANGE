@@ -8,12 +8,11 @@ import FormulaRow from './FormulaRow.jsx'
 import Slider from './Slider.jsx'
 import Transport from './Transport.jsx'
 
-const DEFAULT_PARAMS = { wind: 0.5, speed: 0.85, petals: 80, glow: 0.65 }
-
-export default function SceneWorkspace({ actionsRef, setAccent, setAmbient = () => {}, onBack }) {
-  const [palette, setPalette] = useState('sakura')
-  const [params, setParams] = useState(DEFAULT_PARAMS)
-  const [sources, setSources] = useState(() => Object.fromEntries(FORMULAS.map((f) => [f.key, f.value])))
+export default function SceneWorkspace({ state, setState, actionsRef, setAccent, setAmbient = () => {}, onBack }) {
+  const { palette, params, sources } = state
+  const setPalette = (palette) => setState(s => ({ ...s, palette }))
+  const setParams = (value) => setState(s => ({ ...s, params: typeof value === 'function' ? value(s.params) : value }))
+  const setSources = (value) => setState(s => ({ ...s, sources: typeof value === 'function' ? value(s.sources) : value }))
   const [playing, setPlaying] = useState(true)
   const [editorOpen, setEditorOpen] = useState(false)
   const [editMode, setEditMode] = useState('workflow')
@@ -50,6 +49,7 @@ export default function SceneWorkspace({ actionsRef, setAccent, setAmbient = () 
     togglePlay: () => setPlaying((p) => !p),
     reset: () => setResetToken((n) => n + 1),
     name: `morph-${palette}`,
+    valid: FORMULAS.every(f => compiled[f.key].ok),
   }
 
   const errors = FORMULAS.filter((f) => !compiled[f.key].ok).length

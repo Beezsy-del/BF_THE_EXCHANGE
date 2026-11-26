@@ -124,7 +124,7 @@ const BINARY = {
   '-': [2, (a, b) => a - b],
   '*': [3, (a, b) => a * b],
   '/': [3, (a, b) => a / b],
-  '%': [3, (a, b) => a - b * Math.floor(a / b)],
+  '%': [3, (a, b) => b === 0 ? 0 : a - b * Math.floor(a / b)],
   '^': [5, Math.pow], // right-associative
 }
 
@@ -281,10 +281,9 @@ export function formatNumber(v) {
   return String(Number(v.toPrecision(6)))
 }
 
-// Exact form for writing a formula back to text: 12 significant digits keeps
-// every value a person can type, and cleans float noise like 0.30000000000000004.
+// JavaScript’s shortest round-trip representation preserves every finite literal.
 function numberSource(v) {
-  return String(Number(v.toPrecision(12)))
+  return String(v)
 }
 
 // Prints the tree with the fewest brackets that still read back as the SAME

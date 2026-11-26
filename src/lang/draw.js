@@ -339,7 +339,7 @@ function execute(source) {
           let rgb
           if (s.args.length === 1 && s.args[0].startsWith('#')) rgb = hexToRgb(s.args[0], s.line)
           else {
-            const a = s.args[0]?.toUpperCase() === 'HSL' ? { ...s, args: s.args.slice(1) } : s
+            const a = s.args[0]?.toUpperCase() === 'HSL' ? (s._sliced ??= { ...s, args: s.args.slice(1) }) : s
             const [h, sat, l] = nums(a, env, 3, 3)
             rgb = hslToRgb(h, sat, l)
           }
@@ -362,7 +362,7 @@ function execute(source) {
         case 'TURN': {
           const dir = s.args[0]?.toUpperCase()
           if (dir === 'RIGHT' || dir === 'LEFT') {
-            const rest = { ...s, args: s.args.slice(1) }
+            const rest = (s._sliced ??= { ...s, args: s.args.slice(1) })
             const deg = rest.args.length ? nums(rest, env, 1, 1)[0] : 90
             st.heading += dir === 'RIGHT' ? deg : -deg
           } else {
@@ -379,8 +379,9 @@ function execute(source) {
           ensureGrid()
           const n = Math.max(Math.abs(tx - st.x), Math.abs(ty - st.y))
           limit(n, MAX_DISTANCE, 'LINE length', s.line)
-          charge(n, s.line)
-          for (let k = 0; k <= n; k++) plot(st.x + ((tx - st.x) * k) / (n || 1), st.y + ((ty - st.y) * k) / (n || 1), s.line)
+          const steps = Math.ceil(n)
+          charge(steps, s.line)
+          for (let k = 0; k <= steps; k++) plot(st.x + ((tx - st.x) * k) / (steps || 1), st.y + ((ty - st.y) * k) / (steps || 1), s.line)
           st.x = tx; st.y = ty
           break
         }

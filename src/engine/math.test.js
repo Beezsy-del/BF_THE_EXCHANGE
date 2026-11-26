@@ -64,7 +64,7 @@ function refEval(n, env) {
     case 'call': return REF[n.name](...n.args.map((a) => refEval(a, env)))
     case 'op': {
       const a = refEval(n.args[0], env), b = refEval(n.args[1], env)
-      return { '+': a + b, '-': a - b, '*': a * b, '/': a / b, '^': Math.pow(a, b), '%': a - b * Math.floor(a / b), '<': a < b ? 1 : 0, '>': a > b ? 1 : 0 }[n.op]
+      return { '+': a + b, '-': a - b, '*': a * b, '/': a / b, '^': Math.pow(a, b), '%': b === 0 ? 0 : a - b * Math.floor(a / b), '<': a < b ? 1 : 0, '>': a > b ? 1 : 0 }[n.op]
     }
   }
 }
@@ -92,9 +92,9 @@ test('fuzz: 3,000 random formulas — engine matches reference, text round-trips
 })
 
 test('numbers survive Blocks ↔ Expression without losing precision', () => {
-  for (const v of [0.00005, 1e-7, 123456.789, 0.1 + 0.2, 2.5e10, 3]) {
+  for (const v of [0.00005, 1e-7, 123456.789, 0.1 + 0.2, 2.5e10, 1000000000001, 3]) {
     const src = toSource({ type: 'op', op: '*', args: [{ type: 'var', name: 'x' }, { type: 'num', value: v }] })
-    assert.equal(compile(src, ['x']).fn({ x: 1 }), Number(v.toPrecision(12)), src)
+    assert.equal(compile(src, ['x']).fn({ x: 1 }), v, src)
   }
   // a negative number typed into a block must keep its meaning next to ^
   const neg = toSource({ type: 'op', op: '^', args: [{ type: 'num', value: -3 }, { type: 'num', value: 2 }] })

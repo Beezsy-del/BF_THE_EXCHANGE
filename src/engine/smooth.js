@@ -5,42 +5,55 @@
 export const ease = (cur, target, dt, tau = 0.5) => cur + (target - cur) * (1 - Math.exp(-dt / tau))
 
 const smoothstep = (k) => k * k * (3 - 2 * k)
+const zero = () => 0
+const one = () => 1
+const neutral = (key) => key === 'bright' ? one : zero
 
-// Blends a set of formula functions into the next set over `duration` seconds.
-// Rapid edits (like scrubbing) keep the original base, so closures never pile up.
+// Flat weighted mixtures preserve the current motion when retargeted. Unlike
+// nested blend closures, their evaluation cost stays bounded during scrubbing.
 export class FormulaBlender {
   constructor(duration = 0.9) {
     this.duration = duration
     this.k = 1
-    this.base = null
+    this.base = {}
     this.target = null
     this.out = null
   }
 
   set(next) {
-    if (!this.target) {
-      this.base = this.target = next
-      this.k = 1
-    } else {
-      if (this.k >= 1) { this.base = this.target; this.k = 0 }
-      this.target = next
+    const w = smoothstep(this.k)
+    const keys = new Set([...Object.keys(this.base), ...Object.keys(this.target ?? {}), ...Object.keys(next)])
+    const base = {}
+    for (const key of keys) {
+      const weights = new Map()
+      const add = (fn, weight) => { if (fn && weight > 1e-8) weights.set(fn, (weights.get(fn) ?? 0) + weight) }
+      if (this.target) {
+        for (const [fn, weight] of this.base[key] ?? [[neutral(key), 1]]) add(fn, weight * (1 - w))
+        add(this.target[key] ?? neutral(key), w)
+      } else add(next[key], 1)
+      // Keep the strongest contributions under pathological uninterrupted edits.
+      base[key] = [...weights].sort((a, b) => b[1] - a[1]).slice(0, 32)
     }
-    const self = this
+    this.base = base
+    const first = !this.target
+    this.target = next
+    this.k = first ? 1 : 0
     this.out = {}
-    for (const key of Object.keys(next)) {
-      const a = this.base[key], b = next[key]
-      this.out[key] = !a || a === b ? b : (env) => {
-        const k = self.k
-        if (k >= 1) return b(env)
-        const w = smoothstep(k)
-        return a(env) * (1 - w) + b(env) * w
+    for (const key of keys) {
+      this.out[key] = (env) => {
+        const mix = smoothstep(this.k)
+        const target = (next[key] ?? neutral(key))(env)
+        if (mix >= 1) return target
+        let value = 0
+        for (const [fn, weight] of base[key]) value += fn(env) * weight
+        return value * (1 - mix) + target * mix
       }
     }
     return this.out
   }
 
   tick(dt) {
-    if (this.k < 1) this.k = Math.min(1, this.k + dt / this.duration)
+    if (this.k < 1) this.k = Math.min(1, this.k + Math.max(0, dt) / Math.max(0.001, this.duration))
   }
 }
 

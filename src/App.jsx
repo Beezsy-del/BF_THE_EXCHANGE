@@ -9,7 +9,7 @@ import { run } from './lang/draw.js'
 import { BLOSSOM_CODE } from './gallery/programs.js'
 import { textToArt, artToGrid, gridToArt } from './art/convert.js'
 import { Ambient } from './audio/ambient.js'
-import { cleanSaved, parseProjectFile, serialiseProject, MAX_PROJECT_BYTES } from './app/project.js'
+import { cleanSaved, parseProjectFile, serialiseProject, MAX_PROJECT_BYTES, cleanScene } from './app/project.js'
 import { recordCanvas, canRecord } from './app/record.js'
 import ErrorBoundary from './ui/ErrorBoundary.jsx'
 
@@ -54,11 +54,14 @@ function serialise(a) {
 
 export default function App() {
   const saved = useRef(load()).current
-  const [view, setView] = useState(saved.view && saved.view !== 'scene' ? saved.view : 'home')
+  const [view, setView] = useState(saved.view ?? 'home')
   const [artwork, setArtwork] = useState(() =>
     (saved.artwork && makeArtwork(saved.artwork)) ?? makeArtwork({ origin: 'code', code: BLOSSOM_CODE, name: 'Code Blossom' }))
   const [motion, setMotion] = useState(saved.motion ?? { key: 'original', mode: 'pixels' })
   const [explore, setExplore] = useState(saved.explore ?? { preset: 'marble' })
+  const [scene, setScene] = useState(() => saved.scene ?? cleanScene({}))
+  const drawDrafts = useRef(null)
+  const openSequence = useRef(0)
   const [sound, setSound] = useState(false)
   const [recording, setRecording] = useState(false)
   const [notice, setNotice] = useState(null)
@@ -75,11 +78,13 @@ export default function App() {
 
   // ----- project files -----
   const saveProject = () => {
-    if (!artwork) return
-    const url = URL.createObjectURL(new Blob([serialiseProject(artwork, motion, explore)], { type: 'application/json' }))
+    const current = view === 'draw' ? actionsRef.current.flush?.() : artwork
+    if (!current) { setNotice('Fix the code error before saving this artwork.'); return }
+    if (view === 'scene' && actionsRef.current.valid === false) { setNotice('Fix the scene formula errors before saving.'); return }
+    const url = URL.createObjectURL(new Blob([serialiseProject(current, motion, explore, scene, view)], { type: 'application/json' }))
     const a = document.createElement('a')
     a.href = url
-    a.download = `${(artwork.name ?? 'project').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'project'}.morph.json`
+    a.download = `${(view === 'scene' ? 'Blossom Night' : current.name ?? 'project').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'project'}.morph.json`
     a.click()
     setTimeout(() => URL.revokeObjectURL(url), 10000)
     setNotice('Project saved')
@@ -88,17 +93,21 @@ export default function App() {
     const file = e.target.files?.[0]
     e.target.value = ''
     if (!file) return
+    const request = ++openSequence.current
     if (file.size > MAX_PROJECT_BYTES) { setNotice('That file is too large to be a MORPH project.'); return }
     let text
-    try { text = await file.text() } catch { setNotice('That file couldn’t be read.'); return }
+    try { text = await file.text() } catch { if (request === openSequence.current) setNotice('That file couldn’t be read.'); return }
+    if (request !== openSequence.current) return
     const res = parseProjectFile(text)
     if (!res.ok) { setNotice(res.error); return }
     const a = makeArtwork(res.artwork)
     if (!a) { setNotice('The project’s artwork couldn’t be drawn.'); return }
+    drawDrafts.current = null
     setArtwork(a)
     setMotion(res.motion)
     if (res.explore) setExplore(res.explore)
-    setView('animate')
+    if (res.scene) setScene(res.scene)
+    setView(res.view)
     setNotice(`Opened “${a.name}”`)
   }
 
@@ -106,17 +115,17 @@ export default function App() {
   const record = () => {
     const src = actionsRef.current.canvas?.()
     if (!src || recording) return
-    const ok = recordCanvas(src, { seconds: 6, name: `morph-${(actionsRef.current.name ?? 'art').toLowerCase().replace(/[^a-z0-9]+/g, '-')}`, smooth: !!actionsRef.current.smooth, onDone: () => { setRecording(false); setNotice('Video saved') } })
+    const ok = recordCanvas(src, { seconds: 6, name: `morph-${(actionsRef.current.name ?? 'art').toLowerCase().replace(/[^a-z0-9]+/g, '-')}`, smooth: !!actionsRef.current.smooth, onDone: (result) => { setRecording(false); setNotice(result.ok ? 'Video saved' : result.error ?? 'Recording failed. Please try again.') } })
     if (ok) { setRecording(true); setNotice('Recording 6 seconds…') }
     else setNotice('This browser can’t record video.')
   }
 
   useEffect(() => {
     const id = setTimeout(() => {
-      try { localStorage.setItem(STORE, JSON.stringify({ view, artwork: serialise(artwork), motion, explore })) } catch { /* full or private */ }
+      try { localStorage.setItem(STORE, JSON.stringify({ view, artwork: serialise(artwork), motion, explore, scene })) } catch { /* full or private */ }
     }, 400)
     return () => clearTimeout(id)
-  }, [view, artwork, motion, explore])
+  }, [view, artwork, motion, explore, scene])
 
   const toggleSound = () => {
     ambient.current ??= new Ambient()
@@ -138,13 +147,14 @@ export default function App() {
       ? { origin: 'code', code: o.code, name: exp.title }
       : { origin: 'text', text: o.text, gradient: o.gradient, name: exp.title }
     const a = makeArtwork(spec)
-    if (a) setArtwork(a)
+    if (a) { drawDrafts.current = null; setArtwork(a) }
     setMotion({ key: o.motion ?? 'original', mode: o.mode ?? 'pixels' })
     setView('animate')
   }
 
   const editPixels = () => {
     if (!artwork) return
+    drawDrafts.current = null
     const grid = artToGrid(artwork.art)
     setArtwork({ origin: 'paint', grid, art: gridToArt(grid), name: artwork.name })
     setView('draw')
@@ -162,7 +172,7 @@ export default function App() {
 
   useEffect(() => {
     const onKey = (e) => {
-      if (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return
+      if (e.target.closest?.('input, textarea, select, button, a, [role=button], [contenteditable=true]')) return
       if (e.ctrlKey || e.metaKey || e.altKey) return
       const a = actionsRef.current
       if (e.code === 'Space' && a.togglePlay) { e.preventDefault(); a.togglePlay() }
@@ -175,6 +185,13 @@ export default function App() {
 
   useEffect(() => { if (view === 'home' || view === 'gallery') actionsRef.current = {} }, [view])
 
+  const navigate = (next) => {
+    if (view === 'draw' && next === 'animate' && !actionsRef.current.flush?.()) {
+      setNotice('Fix the code error before animating this artwork.')
+      return
+    }
+    setView(next)
+  }
   const studio = view !== 'home'
   const navKey = view === 'scene' ? 'gallery' : view
 
@@ -188,7 +205,7 @@ export default function App() {
         <nav className="nav" aria-label="Sections">
           {NAV.map((n) => (
             <button key={n.key} className={navKey === n.key ? 'on' : ''} aria-current={navKey === n.key ? 'page' : undefined}
-              onClick={() => setView(n.key)}>{n.label}</button>
+              onClick={() => navigate(n.key)}>{n.label}</button>
           ))}
         </nav>
         <div className="actions">
@@ -226,15 +243,15 @@ export default function App() {
         {view === 'home' && <Home onNavigate={setView} onOpen={openExperience} />}
         {view === 'gallery' && <Gallery onOpen={openExperience} />}
         {view === 'draw' && (
-          <DrawStudio artwork={artwork} setArtwork={setArtwork} actionsRef={actionsRef}
-            onAnimate={() => { setMotion((m) => ({ ...m, key: artwork?.art?.animations && Object.keys(artwork.art.animations).length ? m.key : (m.key === 'original' ? 'breeze' : m.key) })); setView('animate') }} />
+          <DrawStudio artwork={artwork} setArtwork={setArtwork} actionsRef={actionsRef} draftsRef={drawDrafts}
+            onAnimate={(current) => { setMotion((m) => ({ ...m, key: current?.art?.animations && Object.keys(current.art.animations).length ? m.key : (m.key === 'original' ? 'breeze' : m.key) })); setView('animate') }} />
         )}
         {view === 'animate' && (
           <AnimateStudio artwork={artwork} motion={motion} setMotion={setMotion} actionsRef={actionsRef}
-            onEditPixels={editPixels} onEditCode={() => setView('draw')} setAmbient={setAmbient} />
+            onEditPixels={editPixels} onEditCode={() => { if (drawDrafts.current) drawDrafts.current.tab = artwork.origin === 'text' ? 'type' : 'code'; setView('draw') }} setAmbient={setAmbient} />
         )}
         {view === 'explore' && <ExploreStudio state={explore} setState={setExplore} actionsRef={actionsRef} setAmbient={setAmbient} />}
-        {view === 'scene' && <SceneWorkspace actionsRef={actionsRef} setAccent={() => {}} setAmbient={setAmbient} onBack={() => setView('gallery')} />}
+        {view === 'scene' && <SceneWorkspace state={scene} setState={setScene} actionsRef={actionsRef} setAccent={() => {}} setAmbient={setAmbient} onBack={() => setView('gallery')} />}
       </div>
       </ErrorBoundary>
     </div>

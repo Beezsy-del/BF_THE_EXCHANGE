@@ -17,7 +17,7 @@ const FN_LABEL = {
   sin: 'Sine wave', cos: 'Cosine wave', tan: 'Tangent', abs: 'Absolute', sqrt: 'Square root', floor: 'Round down',
   ceil: 'Round up', round: 'Round', fract: 'Fraction', sign: 'Sign', exp: 'Exponential', log: 'Logarithm',
   min: 'Minimum', max: 'Maximum', pow: 'Power', atan2: 'Angle', step: 'Step', clamp: 'Clamp', mix: 'Blend',
-  smoothstep: 'Smooth step', hash: 'Random',
+  smoothstep: 'Smooth step', hash: 'Random', noise: 'Smooth noise',
 }
 const CONST_LABEL = { pi: 'π', tau: 'τ', e: 'e' }
 const PARAMS = new Set(['wind', 'amp'])
@@ -36,7 +36,7 @@ function describe(n, varLabels) {
   }
 }
 
-const PALETTE_FUNCS = ['sin', 'cos', 'abs', 'sqrt', 'fract', 'hash', 'smoothstep', 'clamp', 'mix', 'min', 'max', 'floor']
+const PALETTE_FUNCS = ['sin', 'cos', 'abs', 'sqrt', 'fract', 'hash', 'noise', 'smoothstep', 'clamp', 'mix', 'min', 'max', 'floor']
 const PALETTE_OPS = ['+', '-', '*', '/', '^']
 
 function Sparkline({ values, color }) {
@@ -65,15 +65,19 @@ export default function WorkflowEditor({ value, vars, varLabels, outputLabel, on
 
   // live values: evaluate every block's sub-expression at a sample point
   const fns = useMemo(() => Object.fromEntries((L?.nodes ?? []).map((e) => [e.key, compileAst(e.node)])), [L])
-  const history = useRef({})
-  useEffect(() => { history.current = {} }, [L])
-  const values = {}
-  for (const k in fns) {
-    const v = fns[k](sampleEnv)
-    values[k] = v
-    const h = (history.current[k] ??= [])
-    if (h[h.length - 1] !== v || h.length < 2) { h.push(v); if (h.length > 48) h.shift() }
-  }
+  const [history, setHistory] = useState({})
+  const values = useMemo(() => Object.fromEntries(Object.entries(fns).map(([k, fn]) => [k, fn(sampleEnv)])), [fns, sampleEnv])
+  useEffect(() => {
+    setHistory(previous => {
+      const next = {}
+      for (const k in values) {
+        const old = previous[k]?.fn === fns[k] ? previous[k].values : []
+        const v = values[k]
+        next[k] = { fn: fns[k], values: old[old.length - 1] !== v || old.length < 2 ? [...old, v].slice(-48) : old }
+      }
+      return next
+    })
+  }, [values, fns])
 
   // fit the graph into the panel
   const viewRef = useRef(null)
@@ -256,6 +260,18 @@ export default function WorkflowEditor({ value, vars, varLabels, outputLabel, on
                   onDragLeave={() => setDropKey((k) => (k === e.key ? null : k))}
                   onDrop={(ev) => onDropNode(ev, e.key)}
                   role="button"
+                  tabIndex={0}
+                  aria-pressed={e.key === sel.key}
+                  onKeyDown={(ev) => {
+                    if (ev.target !== ev.currentTarget) return
+                    if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); ev.stopPropagation(); setSelKey(e.key) }
+                    if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(ev.key)) {
+                      ev.preventDefault(); ev.stopPropagation()
+                      const nodes = [...ev.currentTarget.parentElement.querySelectorAll('.node[role="button"]')]
+                      const delta = ev.key === 'ArrowLeft' || ev.key === 'ArrowUp' ? -1 : 1
+                      nodes[(nodes.indexOf(ev.currentTarget) + delta + nodes.length) % nodes.length]?.focus()
+                    }
+                  }}
                   aria-label={`${d.cat}: ${d.title}`}
                 >
                   <div className="node-cat">{d.cat}{d.code && <code>{d.code}</code>}</div>
@@ -272,7 +288,7 @@ export default function WorkflowEditor({ value, vars, varLabels, outputLabel, on
                     <div className="node-title">{d.title}</div>
                   )}
                   {e.node.type !== 'num' && e.node.type !== 'const' && (
-                    <div className="node-val"><Sparkline values={history.current[e.key] ?? []} color={color} /><span>{fmtVal(values[e.key] ?? 0)}</span></div>
+                    <div className="node-val"><Sparkline values={history[e.key]?.values ?? []} color={color} /><span>{fmtVal(values[e.key] ?? 0)}</span></div>
                   )}
                   {Array.from({ length: nIn }, (_, i) => <span key={i} className="port in" style={{ top: portY(i, nIn) - 4 }} />)}
                   <span className="port out" />
@@ -283,7 +299,7 @@ export default function WorkflowEditor({ value, vars, varLabels, outputLabel, on
             <div className="node output" style={{ left: L.output.x, top: L.output.y, '--c': CAT_COLOR.Output }}>
               <div className="node-cat">Output</div>
               <div className="node-title">{outputLabel}</div>
-              <div className="node-val"><Sparkline values={history.current.root ?? []} color={CAT_COLOR.Output} /><span>{fmtVal(values.root ?? 0)}</span></div>
+              <div className="node-val"><Sparkline values={history.root?.values ?? []} color={CAT_COLOR.Output} /><span>{fmtVal(values.root ?? 0)}</span></div>
               <span className="port in" style={{ top: NODE_H / 2 - 4 }} />
             </div>
           </div>

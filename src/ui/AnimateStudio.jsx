@@ -50,7 +50,8 @@ export default function AnimateStudio({ artwork, motion, setMotion, actionsRef, 
   const key = motion.key === 'original' && !hasOwn ? 'breeze' : motion.key
   const preset = key === 'original' ? null : motionByKey(key) ?? MOTIONS[0]
 
-  const [opts, setOpts] = useState({ amp: 1, speed: 1, glow: 1, trails: true })
+  const opts = motion.opts ?? { amp: 1, speed: 1, glow: 1, trails: true }
+  const setOpts = (update) => setMotion(m => ({ ...m, opts: typeof update === 'function' ? update(m.opts ?? { amp: 1, speed: 1, glow: 1, trails: true }) : update }))
   const [playing, setPlaying] = useState(true)
   const [time, setTime] = useState(0)
   const [drawer, setDrawer] = useState(false)
@@ -91,8 +92,8 @@ export default function AnimateStudio({ artwork, motion, setMotion, actionsRef, 
 
   useEffect(() => { setAmbient('calm', opts.amp * 0.5) }, [opts.amp, setAmbient])
 
-  const choose = (m) => setMotion({ key: m.key, mode: m.mode ?? motion.mode })
-  const chooseOriginal = () => setMotion({ key: 'original', mode: motion.mode })
+  const choose = (m) => setMotion({ key: m.key, mode: m.mode ?? motion.mode, opts })
+  const chooseOriginal = () => setMotion({ key: 'original', mode: motion.mode, opts })
   const editFormula = (k, v) => setMotion({ ...motion, key, custom: { ...(motion.custom ?? {}), [k]: v } })
   const mode = motion.mode ?? 'pixels'
 
@@ -196,7 +197,7 @@ export default function AnimateStudio({ artwork, motion, setMotion, actionsRef, 
                 ))}
               </div>
               <button className="ghost small evolve-btn" onClick={() => setVariants(evolve(sources, MOTION_VARS))} title="Generate four variations">✦ Evolve</button>
-              {edited && <button className="link" onClick={() => setMotion({ key, mode })}>Reset to preset</button>}
+              {edited && <button className="link" onClick={() => setMotion({ key, mode, opts })}>Reset to preset</button>}
             </>
           )}
           {!preset && <span className="drawer-sub">This motion is written in the artwork's code, inside its ANIMATE blocks.</span>}
@@ -205,7 +206,7 @@ export default function AnimateStudio({ artwork, motion, setMotion, actionsRef, 
           <div className="drawer-body">
             {variants ? (
               <EvolveGrid art={art} variants={variants} mode={mode}
-                onPick={(v) => { setMotion({ key, mode, custom: v.sources }); setVariants(null) }}
+                onPick={(v) => { setMotion({ key, mode, custom: v.sources, opts }); setVariants(null) }}
                 onAgain={() => setVariants(evolve(sources, MOTION_VARS))}
                 onClose={() => setVariants(null)} />
             ) : editMode === 'expression' ? (

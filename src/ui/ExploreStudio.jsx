@@ -14,8 +14,10 @@ export default function ExploreStudio({ state, setState, actionsRef, setAmbient 
   const preset = EXPLORE_PRESETS.find((p) => p.key === state.preset) ?? EXPLORE_PRESETS[0]
   const formula = state.formula ?? preset.formula
   const palette = state.palette ?? preset.palette
-  const [amp, setAmp] = useState(1)
-  const [speed, setSpeed] = useState(preset.speed)
+  const amp = state.amp ?? 1
+  const speed = state.speed ?? preset.speed
+  const setAmp = (amp) => setState(s => ({ ...s, amp }))
+  const setSpeed = (speed) => setState(s => ({ ...s, speed }))
   const [playing, setPlaying] = useState(true)
   const [time, setTime] = useState(0)
   const [drawer, setDrawer] = useState(false)
@@ -48,10 +50,8 @@ export default function ExploreStudio({ state, setState, actionsRef, setAmbient 
     if (!first.current) crossfade(canvasRef.current, fadeRef.current, 1200)
     first.current = false
     rendererRef.current.configure({ kind: preset.kind, palette, map: preset.map, bands: preset.bands })
-    setSpeed((s) => s)
   }, [preset.key, palette])
 
-  useEffect(() => { setSpeed(preset.speed) }, [preset.key])
   useEffect(() => { setAmbient(MOODS[palette] ?? 'calm', amp * 0.4) }, [palette, amp, setAmbient])
 
   useEffect(() => {

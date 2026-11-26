@@ -72,10 +72,10 @@ export class ArtRenderer {
     const n = P.length
     // per-pixel animation props: layer-specific override the "*" defaults
     const all = art.animations['*'] ?? {}
-    const byLayer = {}
+    const byLayer = Object.create(null)
     for (const name of art.layers) byLayer[name] = { ...all, ...(art.animations[name] ?? {}) }
     // layer centres
-    const sums = {}
+    const sums = Object.create(null)
     for (const p of P) {
       const s = (sums[p.layer] ??= [0, 0, 0])
       s[0] += p.x; s[1] += p.y; s[2]++
@@ -92,7 +92,7 @@ export class ArtRenderer {
     this.px = new Float32Array(n); this.py = new Float32Array(n)
     this.vx = new Float32Array(n); this.vy = new Float32Array(n)
     for (let i = 0; i < n; i++) {
-      if (i < this.n) {
+      if (i < this.n && [ox[i], oy[i], ovx[i], ovy[i]].every(Number.isFinite)) {
         this.px[i] = ox[i]; this.py[i] = oy[i]; this.vx[i] = ovx[i]; this.vy[i] = ovy[i]
       } else {
         this.px[i] = P[i].x; this.py[i] = P[i].y
@@ -101,6 +101,13 @@ export class ArtRenderer {
     this.n = n
     if (!prev || prev.width !== art.width || prev.height !== art.height) this.resize()
     else if (!this.img && this.mode === 'pixels') this.resize()
+  }
+
+  reset() {
+    for (let i = 0; i < this.n; i++) {
+      this.px[i] = this.items[i].x; this.py[i] = this.items[i].y
+      this.vx[i] = this.vy[i] = 0
+    }
   }
 
   scatter(power = 6) {
@@ -187,6 +194,13 @@ export class ArtRenderer {
       const it = this.items[i]
       this.guard(i)
       this.evaluate(it, env, out)
+      // Bound targets before storing them in Float32 buffers; repair damaged state.
+      const bound = Math.max(art.width, art.height) * 16
+      out[0] = Number.isFinite(out[0]) ? Math.max(-bound, Math.min(bound, out[0])) : it.x
+      out[1] = Number.isFinite(out[1]) ? Math.max(-bound, Math.min(bound, out[1])) : it.y
+      if (![this.px[i], this.py[i], this.vx[i], this.vy[i]].every(Number.isFinite)) {
+        this.px[i] = it.x; this.py[i] = it.y; this.vx[i] = this.vy[i] = 0
+      }
       // spring toward the formula's target, with damping
       let ax = (out[0] - this.px[i]) * 0.09, ay = (out[1] - this.py[i]) * 0.09
       const ddx = this.px[i] - mx, ddy = this.py[i] - my

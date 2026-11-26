@@ -126,6 +126,9 @@ export class Ambient {
     o1.connect(g); o2.connect(g2).connect(g)
     g.connect(this.verb)
     g.connect(this.master)
+    o1.onended = () => {
+      o1.disconnect(); o2.disconnect(); g2.disconnect(); g.disconnect()
+    }
     o1.start(now); o2.start(now)
     o1.stop(now + 3.4); o2.stop(now + 3.4)
   }

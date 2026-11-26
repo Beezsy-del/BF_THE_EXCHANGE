@@ -45,7 +45,7 @@ export class PixelRenderer {
   }
 
   updatePetals(t, dt) {
-    const want = Math.round(this.params.petals)
+    const want = Number.isFinite(this.params.petals) ? Math.max(0, Math.min(240, Math.round(this.params.petals))) : 0
     while (this.petals.length < want) this.petals.push(this.spawnPetal(t, true))
     if (this.petals.length > want) this.petals.length = want
     const step = dt * 60

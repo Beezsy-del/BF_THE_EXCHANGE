@@ -7,6 +7,7 @@ export default function PixelEditor({ grid, tool, color, brush, mirror, filled, 
   const wrapRef = useRef(null)
   const canvasRef = useRef(null)
   const work = useRef(null)
+  const bitmap = useRef(null)
   const drag = useRef(null)
   const [scale, setScale] = useState(8)
   const [hover, setHover] = useState(null)
@@ -30,16 +31,23 @@ export default function PixelEditor({ grid, tool, color, brush, mirror, filled, 
     c.width = w * s
     c.height = h * s
     const g = c.getContext('2d')
-    g.fillStyle = `rgb(${bg[0]},${bg[1]},${bg[2]})`
-    g.fillRect(0, 0, c.width, c.height)
-    for (let y = 0; y < h; y++) {
-      for (let x = 0; x < w; x++) {
-        const v = data[y * w + x]
-        if (v < 0) continue
-        g.fillStyle = `rgb(${(v >> 16) & 255},${(v >> 8) & 255},${v & 255})`
-        g.fillRect(x * s, y * s, s, s)
-      }
+    // One native-resolution pixel buffer, then one nearest-neighbour blit.
+    // Avoid thousands of canvas API calls for each hover or brush movement.
+    const scratch = (bitmap.current ??= document.createElement('canvas'))
+    if (scratch.width !== w || scratch.height !== h) { scratch.width = w; scratch.height = h }
+    const sg = scratch.getContext('2d')
+    const image = sg.createImageData(w, h)
+    const pixels = image.data
+    for (let i = 0; i < data.length; i++) {
+      const v = data[i], k = i * 4
+      pixels[k] = v < 0 ? bg[0] : (v >> 16) & 255
+      pixels[k + 1] = v < 0 ? bg[1] : (v >> 8) & 255
+      pixels[k + 2] = v < 0 ? bg[2] : v & 255
+      pixels[k + 3] = 255
     }
+    sg.putImageData(image, 0, 0)
+    g.imageSmoothingEnabled = false
+    g.drawImage(scratch, 0, 0, c.width, c.height)
     if (showGrid && s >= 6) {
       g.strokeStyle = 'rgba(255,255,255,0.055)'
       g.lineWidth = 1
@@ -88,7 +96,7 @@ export default function PixelEditor({ grid, tool, color, brush, mirror, filled, 
     const [x, y] = cellAt(e)
     if (tool === 'picker') {
       const v = grid.data[y * grid.w + x]
-      if (v >= 0) onPick(v)
+      onPick(v >= 0 ? v : (grid.bg[0] << 16) | (grid.bg[1] << 8) | grid.bg[2])
       return
     }
     onBegin()

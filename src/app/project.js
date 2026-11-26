@@ -8,10 +8,12 @@ import { MAX_EXPR_LENGTH } from '../engine/expr.js'
 import { GRADIENTS } from '../art/convert.js'
 import { MOTIONS } from '../animate/motions.js'
 import { EXPLORE_PRESETS, PALETTES } from '../explore/fields.js'
+import { FORMULAS } from '../scene/formulas.js'
+import { PALETTES as SCENE_PALETTES } from '../scene/palettes.js'
 
 export const PROJECT_FORMAT = 'morph-project'
 export const MAX_PROJECT_BYTES = 2 * 1024 * 1024
-const VIEWS = ['home', 'draw', 'animate', 'explore', 'gallery']
+const VIEWS = ['home', 'draw', 'animate', 'explore', 'gallery', 'scene']
 const own = (o, k) => Object.prototype.hasOwnProperty.call(o, k)
 const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v)
 const str = (v, max) => (typeof v === 'string' && v.length <= max ? v : null)
@@ -61,12 +63,26 @@ function cleanFormulas(f, keys) {
   return Object.keys(out).length ? out : undefined
 }
 
+const bounded = (v, lo, hi, fallback) => typeof v === 'number' && Number.isFinite(v) && v >= lo && v <= hi ? v : fallback
+export function cleanScene(s) {
+  if (!isObj(s)) return null
+  const p = isObj(s.params) ? s.params : {}
+  const sources = Object.fromEntries(FORMULAS.map(f => [f.key, str(s.sources?.[f.key], MAX_EXPR_LENGTH) ?? f.value]))
+  return {
+    palette: typeof s.palette === 'string' && own(SCENE_PALETTES, s.palette) ? s.palette : 'sakura',
+    params: { wind: bounded(p.wind, 0, 2, .5), speed: bounded(p.speed, .1, 3, .85), petals: bounded(p.petals, 0, 240, 80), glow: bounded(p.glow, 0, 1.2, .65) },
+    sources,
+  }
+}
+
 export function cleanMotion(m) {
   if (!isObj(m)) return null
   const key = m.key === 'original' || MOTIONS.some((x) => x.key === m.key) ? m.key : 'breeze'
   const mode = m.mode === 'particles' ? 'particles' : 'pixels'
   const custom = cleanFormulas(m.custom, ['dx', 'dy', 'hue', 'bright'])
-  return custom ? { key, mode, custom } : { key, mode }
+  const out = custom ? { key, mode, custom } : { key, mode }
+  if (isObj(m.opts)) out.opts = { amp: bounded(m.opts.amp, 0, 3, 1), speed: bounded(m.opts.speed, .1, 3, 1), glow: bounded(m.opts.glow, 0, 3, 1), trails: typeof m.opts.trails === 'boolean' ? m.opts.trails : true }
+  return out
 }
 
 export function cleanExplore(e) {
@@ -76,6 +92,8 @@ export function cleanExplore(e) {
   if (typeof e.palette === 'string' && own(PALETTES, e.palette) && !PALETTES[e.palette].hidden) out.palette = e.palette
   const formula = str(e.formula, MAX_EXPR_LENGTH)
   if (formula) out.formula = formula
+  if (e.amp !== undefined) out.amp = bounded(e.amp, 0, 2.5, 1)
+  if (e.speed !== undefined) out.speed = bounded(e.speed, .05, 3, 1)
   return out
 }
 
@@ -87,6 +105,7 @@ export function cleanSaved(s) {
     artwork: cleanArtworkSpec(s.artwork),
     motion: cleanMotion(s.motion),
     explore: cleanExplore(s.explore),
+    scene: cleanScene(s.scene),
   }
 }
 
@@ -98,11 +117,11 @@ export function parseProjectFile(text) {
   if (!isObj(obj) || obj.format !== PROJECT_FORMAT || obj.version !== 1) return { ok: false, error: 'That isn’t a MORPH project file.' }
   const artwork = cleanArtworkSpec(obj.artwork)
   if (!artwork) return { ok: false, error: 'The project’s artwork is missing or damaged.' }
-  return { ok: true, artwork, motion: cleanMotion(obj.motion) ?? { key: 'breeze', mode: 'pixels' }, explore: cleanExplore(obj.explore) }
+  return { ok: true, artwork, motion: cleanMotion(obj.motion) ?? { key: 'breeze', mode: 'pixels' }, explore: cleanExplore(obj.explore), scene: cleanScene(obj.scene), view: obj.view === 'scene' ? 'scene' : obj.view === 'explore' ? 'explore' : 'animate' }
 }
 
-export function serialiseProject(artwork, motion, explore) {
+export function serialiseProject(artwork, motion, explore, scene = null, view = 'animate') {
   const { art, ...spec } = artwork
   if (spec.grid) spec.grid = { ...spec.grid, data: Array.from(spec.grid.data) }
-  return JSON.stringify({ format: PROJECT_FORMAT, version: 1, artwork: spec, motion, explore }, null, 1)
+  return JSON.stringify({ format: PROJECT_FORMAT, version: 1, artwork: spec, motion, explore, ...(scene ? { scene: cleanScene(scene) } : {}), view }, null, 1)
 }

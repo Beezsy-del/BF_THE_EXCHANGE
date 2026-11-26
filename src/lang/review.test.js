@@ -57,13 +57,14 @@ test('a first DOT lands at the centre of the canvas', () => {
   assert.deepEqual(px('CANVAS 32 32\nLAYER sky\nDOT'), ['16,16'])
 })
 
-test('#1 programs stop within the time budget', () => {
+test('#1 programs stop within the time budget', (t) => {
+  let clock = 0
+  t.mock.method(performance, 'now', () => (clock += 100))
   const heavy = 'CANVAS 320 180\nREPEAT 400 AS j { REPEAT 320 AS i { IF ' +
     Array(30).fill('noise(i * 0.1, j * 0.2)').join(' + ') + ' { DOT } } }'
-  const t = Date.now()
   const r = run(heavy)
-  assert.ok(Date.now() - t < 1500, `took ${Date.now() - t} ms`)
   assert.equal(r.ok, false)
+  assert.match(r.error, /time|long|budget/i)
 })
 
 test('#1 per-pixel formulas have a small size budget', () => {

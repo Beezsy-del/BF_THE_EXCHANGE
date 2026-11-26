@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import PixelEditor from './PixelEditor.jsx'
 import CodeEditor from './CodeEditor.jsx'
 import ArtCanvas from './ArtCanvas.jsx'
@@ -48,15 +48,16 @@ const TEMPLATES = [
 
 const Icon = ({ d }) => <svg viewBox="0 0 16 16" aria-hidden><path d={d} /></svg>
 
-export default function DrawStudio({ artwork, setArtwork, actionsRef, onAnimate }) {
+export default function DrawStudio({ artwork, setArtwork, actionsRef, onAnimate, draftsRef }) {
+  const draft = draftsRef.current
   const origin = artwork?.origin ?? 'paint'
-  const [tab, setTab] = useState(origin === 'text' ? 'type' : origin)
+  const [tab, setTab] = useState(draft?.tab ?? (origin === 'text' ? 'type' : origin))
 
   // each tab keeps its own work
-  const [grid, setGrid] = useState(() => (origin === 'paint' && artwork.grid ? artwork.grid : emptyGrid(64, 64)))
-  const [code, setCode] = useState(() => (origin === 'code' ? artwork.code : BLOSSOM_CODE))
-  const [text, setText] = useState(() => (origin === 'text' ? artwork.text : 'MORPH'))
-  const [gradient, setGradient] = useState(() => (origin === 'text' ? artwork.gradient : 'neon'))
+  const [grid, setGrid] = useState(() => draft?.grid ?? (origin === 'paint' && artwork.grid ? artwork.grid : emptyGrid(64, 64)))
+  const [code, setCode] = useState(() => draft?.code ?? (origin === 'code' ? artwork.code : BLOSSOM_CODE))
+  const [text, setText] = useState(() => draft?.text ?? (origin === 'text' ? artwork.text : 'MORPH'))
+  const [gradient, setGradient] = useState(() => draft?.gradient ?? (origin === 'text' ? artwork.gradient : 'neon'))
 
   // paint state
   const [tool, setTool] = useState('pencil')
@@ -72,13 +73,28 @@ export default function DrawStudio({ artwork, setArtwork, actionsRef, onAnimate 
 
   // code state
   const [codeResult, setCodeResult] = useState(() => run(code))
-  const lastCodeArt = useRef(codeResult.ok ? codeResult.art : null)
+  const lastCodeArt = useRef(codeResult.ok ? codeResult.art : draft?.lastCodeArt ?? null)
   const [showRef, setShowRef] = useState(false)
 
+  useLayoutEffect(() => {
+    draftsRef.current = { tab, grid, code, text, gradient, lastCodeArt: lastCodeArt.current }
+  })
+
+  // Commit source and pixels together. Save/Animate call this synchronously,
+  // so pending debounce work is never mistaken for the user's latest edit.
   const pushArt = (t = tab, g = grid) => {
-    if (t === 'paint') setArtwork({ origin: 'paint', grid: g, art: gridToArt(g), name: 'My drawing' })
-    if (t === 'code' && lastCodeArt.current) setArtwork({ origin: 'code', code, art: lastCodeArt.current, name: 'My program' })
-    if (t === 'type') setArtwork({ origin: 'text', text, gradient, art: textToArt(text, { gradient }), name: `“${text}”` })
+    let next
+    if (t === 'paint') next = { origin: 'paint', grid: g, art: gridToArt(g), name: 'My drawing' }
+    if (t === 'code') {
+      const result = run(code)
+      setCodeResult(result)
+      if (!result.ok) return null
+      lastCodeArt.current = result.art
+      next = { origin: 'code', code, art: result.art, name: 'My program' }
+    }
+    if (t === 'type') next = { origin: 'text', text, gradient, art: textToArt(text, { gradient }), name: `“${text}”` }
+    if (next) setArtwork(next)
+    return next
   }
 
   const switchTab = (t) => { setTab(t); pushArt(t) }
@@ -107,15 +123,19 @@ export default function DrawStudio({ artwork, setArtwork, actionsRef, onAnimate 
   // Image → pixel art. Only raster images (no SVG), at most 10 MB; decoded by
   // the browser into a bitmap, fitted to the canvas, then softly posterised.
   const imageRef = useRef(null)
+  const importSequence = useRef(0)
+  useEffect(() => () => { importSequence.current++ }, [])
   const [importMsg, setImportMsg] = useState(null)
   const importImage = async (e) => {
     const file = e.target.files?.[0]
     e.target.value = ''
     if (!file) return
+    const request = ++importSequence.current
     if (!['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(file.type)) { setImportMsg('Use a PNG, JPEG, WebP or GIF image.'); return }
     if (file.size > 10 * 1024 * 1024) { setImportMsg('That image is over 10 MB.'); return }
     try {
       const bmp = await createImageBitmap(file)
+      if (request !== importSequence.current) { bmp.close?.(); return }
       const { w, h } = grid
       const c = document.createElement('canvas')
       c.width = w; c.height = h
@@ -135,6 +155,7 @@ export default function DrawStudio({ artwork, setArtwork, actionsRef, onAnimate 
       replaceGrid({ ...grid, data })
       setImportMsg(null)
     } catch {
+      if (request !== importSequence.current) return
       setImportMsg('That image couldn’t be read.')
     }
   }
@@ -145,12 +166,14 @@ export default function DrawStudio({ artwork, setArtwork, actionsRef, onAnimate 
     if (r.ok) replaceGrid(artToGrid(r.art))
   }
 
+  const historyActions = useRef({ undo, redo })
+  useLayoutEffect(() => { historyActions.current = { undo, redo } })
   useEffect(() => {
     if (tab !== 'paint') return
     const onKey = (e) => {
       if (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); return }
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); redo(); return }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? historyActions.current.redo() : historyActions.current.undo(); return }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); historyActions.current.redo(); return }
       if (e.ctrlKey || e.metaKey || e.altKey) return
       const t = TOOLS.find((x) => x.key1.toLowerCase() === e.key.toLowerCase())
       if (t) setTool(t.key)
@@ -160,7 +183,7 @@ export default function DrawStudio({ artwork, setArtwork, actionsRef, onAnimate 
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  })
+  }, [tab])
 
   // ----- code -----
   useEffect(() => {
@@ -183,7 +206,9 @@ export default function DrawStudio({ artwork, setArtwork, actionsRef, onAnimate 
   }, [typeArt, tab])
 
   const previewRef = useRef(null)
+  const paintRef = useRef(null)
   actionsRef.current = {
+    flush: () => pushArt(),
     png: () => {
       if (tab !== 'paint') return previewRef.current?.png()
       const a = gridToArt(grid)
@@ -196,7 +221,10 @@ export default function DrawStudio({ artwork, setArtwork, actionsRef, onAnimate 
       for (const p of a.pixels) { g.fillStyle = `rgb(${p.r},${p.g},${p.b})`; g.fillRect(p.x * k, p.y * k, k, k) }
       return c.toDataURL('image/png')
     },
-    fullscreen: tab !== 'paint' ? () => previewRef.current?.fullscreen() : undefined,
+    fullscreen: tab !== 'paint' ? () => previewRef.current?.fullscreen() : () => {
+      if (document.fullscreenElement) document.exitFullscreen?.()
+      else paintRef.current?.requestFullscreen?.()
+    },
     name: tab === 'type' ? text : 'drawing',
   }
 
@@ -216,11 +244,11 @@ export default function DrawStudio({ artwork, setArtwork, actionsRef, onAnimate 
           {tab === 'code' && (codeResult.ok ? `${codeResult.art.pixels.length.toLocaleString()} pixels drawn by your program` : `Line ${codeResult.line}: ${codeResult.error}`)}
           {tab === 'type' && 'Type a word, pick a gradient, then animate it'}
         </span>
-        <button className="primary" onClick={onAnimate}>Animate this →</button>
+        <button className="primary" onClick={() => { const current = pushArt(); if (current) onAnimate(current) }}>Animate this →</button>
       </div>
 
       {tab === 'paint' && (
-        <div className="paint-layout">
+        <div className="paint-layout" ref={paintRef}>
           <div className="toolrail" role="toolbar" aria-label="Tools">
             {TOOLS.map((t) => (
               <button key={t.key} className={tool === t.key ? 'on' : ''} onClick={() => setTool(t.key)} title={`${t.label} (${t.key1})`} aria-label={t.label} aria-pressed={tool === t.key}>

@@ -28,7 +28,7 @@ const ArtCanvas = forwardRef(function ArtCanvas(
       if (!document.fullscreenElement) wrapRef.current?.requestFullscreen?.()
       else document.exitFullscreen?.()
     },
-    reset: () => { crossfade(canvasRef.current, fadeRef.current, 700); live.current.t = 0 },
+    reset: () => { crossfade(canvasRef.current, fadeRef.current, 700); live.current.t = 0; rendererRef.current?.reset() },
     scatter: () => rendererRef.current?.scatter(6),
     canvas: () => canvasRef.current,
   }))

@@ -11,6 +11,14 @@ import { PixelRenderer } from '../scene/renderer.js'
 import { FORMULAS } from '../scene/formulas.js'
 
 const cache = new Map()
+let queue = Promise.resolve()
+const yieldToInput = () => new Promise(resolve => setTimeout(resolve, 0))
+async function warmup(count, frame) {
+  for (let i = 0; i < count; i++) {
+    frame(i)
+    if (i % 4 === 3) await yieldToInput()
+  }
+}
 
 function upscale(src, scale) {
   const c = document.createElement('canvas')
@@ -22,17 +30,25 @@ function upscale(src, scale) {
   return c.toDataURL('image/png')
 }
 
-function artThumb(art, t, mode) {
+async function artThumb(art, t, mode) {
   const c = document.createElement('canvas')
   const r = new ArtRenderer(c)
   r.setArt(art)
   r.setMode(mode)
-  for (let i = 0; i < (mode === 'particles' ? 40 : 1); i++) r.frame(t, 1 / 60, { amp: 1, glow: 1, trails: false, mx: -1000, my: -1000 })
+  await warmup(mode === 'particles' ? 40 : 1, () => r.frame(t, 1 / 60, { amp: 1, glow: 1, trails: false, mx: -1000, my: -1000 }))
   return mode === 'particles' ? c.toDataURL('image/png') : upscale(c, Math.max(2, Math.round(360 / art.width)))
 }
 
 export function thumbFor(exp) {
   if (cache.has(exp.key)) return cache.get(exp.key)
+  const pending = queue.then(() => renderThumb(exp))
+  cache.set(exp.key, pending)
+  queue = pending.catch(() => null)
+  return pending
+}
+
+async function renderThumb(exp) {
+  await yieldToInput()
   let url = null
   try {
     const o = exp.open
@@ -43,7 +59,7 @@ export function thumbFor(exp) {
       const fx = {}
       for (const f of FORMULAS) fx[f.key] = compile(f.value, f.vars).fn
       r.setFormulas(fx)
-      for (let i = 0; i < 160; i++) r.frame(i / 60, 1 / 60)
+      await warmup(160, i => r.frame(i / 60, 1 / 60))
       url = upscale(c, 2)
     } else if (o.view === 'explore') {
       const p = EXPLORE_PRESETS.find((x) => x.key === o.preset)
@@ -52,15 +68,14 @@ export function thumbFor(exp) {
       r.configure({ kind: p.kind, palette: p.palette, map: p.map, bands: p.bands })
       const fn = compile(p.formula, FIELD_VARS).fn
       const frames = p.kind === 'flow' ? 140 : 1
-      for (let i = 0; i < frames; i++) r.frame(fn, 2 + i / 60, 1)
+      await warmup(frames, i => r.frame(fn, 2 + i / 60, 1))
       url = c.toDataURL('image/png')
     } else if (o.code) {
       const res = run(o.code)
-      if (res.ok) url = artThumb(res.art, 2.5, 'pixels')
+      if (res.ok) url = await artThumb(res.art, 2.5, 'pixels')
     } else if (o.text) {
-      url = artThumb(textToArt(o.text, { gradient: o.gradient }), 0, 'pixels')
+      url = await artThumb(textToArt(o.text, { gradient: o.gradient }), 0, 'pixels')
     }
   } catch { url = null }
-  cache.set(exp.key, url)
   return url
 }

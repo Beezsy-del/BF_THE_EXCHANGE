@@ -31,8 +31,16 @@
   ```
   Optional:
   ```bash
-  npm test           # 55 automated tests (maths fuzzing, language, workflow, security)
+  npm test           # automated regression tests (maths fuzzing, language, workflow, security)
   npm run build      # production build in dist/
   npm run preview    # serve the production build locally
   ```
 - **Controls:** Space = play/pause · R = reset · F = fullscreen. In Paint: B pencil, E eraser, G fill, L line, U rectangle, O ellipse, I colour picker, M mirror, [ ] brush size, Ctrl+Z / Ctrl+Y undo/redo.
+
+### Saving and editing
+- Save includes the selected artwork, motion controls, Explore settings, and Blossom Night settings. Older version-1 project files still open with safe defaults for the new fields.
+- Save and Animate validate the latest code immediately. Invalid drafts remain editable, but cannot replace the valid artwork in a saved file.
+- Paint, Code, and Type drafts survive navigation during the current session. Inactive drafts and undo history are not a separate saved document; export the artwork you want to keep before closing the page.
+- In the code editor, Tab indents. Shift+Tab, or Escape followed by Tab, leaves the editor. Workflow nodes support Tab, Enter/Space, and arrow-key focus movement.
+- Modulo by zero returns zero for that operation, so surrounding arithmetic remains usable. Other non-finite final expression results still fall back to zero.
+- Text rasterisation uses a browser canvas; it is not a server-side rendering API.

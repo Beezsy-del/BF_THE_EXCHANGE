@@ -6,8 +6,9 @@ export function ExperienceCard({ exp, onOpen }) {
   const [src, setSrc] = useState(null)
   useEffect(() => {
     // render previews after first paint so the page appears instantly
-    const id = setTimeout(() => setSrc(thumbFor(exp)), 30)
-    return () => clearTimeout(id)
+    let active = true
+    const id = setTimeout(() => { thumbFor(exp).then(src => { if (active) setSrc(src) }) }, 30)
+    return () => { active = false; clearTimeout(id) }
   }, [exp])
   return (
     <button className="xcard" onClick={() => onOpen(exp)}>
