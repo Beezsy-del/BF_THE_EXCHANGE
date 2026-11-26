@@ -1,0 +1,21 @@
+{
+  "name": "morph",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "node --test src/engine/expr.test.js src/lang/draw.test.js src/workflow/tree.test.js src/art/art.test.js src/app/security.test.js src/engine/math.test.js"
+  },
+  "dependencies": {
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "4.3.4",
+    "vite": "6.4.6"
+  },
+  "description": "MORPH — Art Through Code: draw pixel art, bring it to life with mathematics"
+}
