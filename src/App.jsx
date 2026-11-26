@@ -63,6 +63,7 @@ export default function App() {
   const drawDrafts = useRef(null)
   const openSequence = useRef(0)
   const [sound, setSound] = useState(false)
+  const [soundStarting, setSoundStarting] = useState(false)
   const [recording, setRecording] = useState(false)
   const [notice, setNotice] = useState(null)
   const [crashKey, setCrashKey] = useState(0)
@@ -127,11 +128,25 @@ export default function App() {
     return () => clearTimeout(id)
   }, [view, artwork, motion, explore, scene])
 
-  const toggleSound = () => {
+  const toggleSound = async () => {
+    if (soundStarting) return
     ambient.current ??= new Ambient()
-    if (sound) ambient.current.stop()
-    else ambient.current.start()
-    setSound(!sound)
+    if (sound) {
+      ambient.current.stop()
+      setSound(false)
+      return
+    }
+    setSoundStarting(true)
+    try {
+      await ambient.current.start()
+      setSound(true)
+    } catch {
+      ambient.current.stop()
+      setSound(false)
+      setNotice('Audio could not start. Allow sound for this site in your browser, then try again.')
+    } finally {
+      setSoundStarting(false)
+    }
   }
   const setAmbient = useCallback((mood, wind) => {
     ambient.current?.setMood(mood)
@@ -209,12 +224,12 @@ export default function App() {
           ))}
         </nav>
         <div className="actions">
-          <button className={`ghost sound ${sound ? 'on' : ''}`} onClick={toggleSound} aria-pressed={sound} title="Ambient sound">
+          <button className={`ghost sound ${sound ? 'on' : ''}`} onClick={toggleSound} disabled={soundStarting} aria-pressed={sound} title="Ambient sound">
             <svg viewBox="0 0 16 16" aria-hidden>
               <path d="M2 6h3l4-3v10l-4-3H2z" />
               {sound && <path className="wave" d="M11 5.5c1 .7 1 4.3 0 5M12.8 4c2 1.6 2 6.4 0 8" />}
             </svg>
-            {sound ? 'Sound on' : 'Sound'}
+            {soundStarting ? 'Starting…' : sound ? 'Sound on' : 'Sound'}
           </button>
           <span className="act-sep" />
           <button className="ghost" onClick={() => fileRef.current?.click()} title="Open a .morph.json project">Open</button>

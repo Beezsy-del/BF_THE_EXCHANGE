@@ -15,14 +15,23 @@ export class Ambient {
     this.wind = 0.5
   }
 
-  start() {
+  async start() {
     if (this.on) return
     const ctx = (this.ctx ??= new (window.AudioContext || window.webkitAudioContext)())
-    ctx.resume()
+    let timer
+    try {
+      await Promise.race([
+        ctx.resume(),
+        new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('Audio startup timed out')), 4000) }),
+      ])
+      if (ctx.state !== 'running') throw new Error('Audio is not running')
+    } finally {
+      clearTimeout(timer)
+    }
     this.on = true
     const master = (this.master = ctx.createGain())
     master.gain.value = 0
-    master.gain.setTargetAtTime(0.55, ctx.currentTime, 1.5)
+    master.gain.setTargetAtTime(0.8, ctx.currentTime, 0.25)
     master.connect(ctx.destination)
 
     // a long, soft reverb from decaying noise
@@ -45,7 +54,7 @@ export class Ambient {
     lp.frequency.value = 900
     lp.Q.value = 0.3
     const padGain = ctx.createGain()
-    padGain.gain.value = 0.05
+    padGain.gain.value = 0.12
     lp.connect(padGain)
     padGain.connect(master)
     padGain.connect(verb)
