@@ -89,7 +89,9 @@ export default function App() {
     e.target.value = ''
     if (!file) return
     if (file.size > MAX_PROJECT_BYTES) { setNotice('That file is too large to be a MORPH project.'); return }
-    const res = parseProjectFile(await file.text())
+    let text
+    try { text = await file.text() } catch { setNotice('That file couldn’t be read.'); return }
+    const res = parseProjectFile(text)
     if (!res.ok) { setNotice(res.error); return }
     const a = makeArtwork(res.artwork)
     if (!a) { setNotice('The project’s artwork couldn’t be drawn.'); return }

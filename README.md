@@ -31,7 +31,7 @@
   ```
   Optional:
   ```bash
-  npm test           # 45 automated tests (maths fuzzing, language, workflow, security)
+  npm test           # 55 automated tests (maths fuzzing, language, workflow, security)
   npm run build      # production build in dist/
   npm run preview    # serve the production build locally
   ```

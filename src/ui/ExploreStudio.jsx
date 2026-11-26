@@ -3,7 +3,7 @@ import Slider from './Slider.jsx'
 import Transport from './Transport.jsx'
 import FormulaRow from './FormulaRow.jsx'
 import WorkflowEditor from '../workflow/WorkflowEditor.jsx'
-import { compile } from '../engine/expr.js'
+import { compile, PER_PIXEL } from '../engine/expr.js'
 import { ease, crossfade } from '../engine/smooth.js'
 import { FieldRenderer, EXPLORE_PRESETS, PALETTES, FIELD_VARS, FIELD_VAR_LABELS } from '../explore/fields.js'
 import { useIdleCursor } from './useIdleCursor.js'
@@ -20,6 +20,7 @@ export default function ExploreStudio({ state, setState, actionsRef, setAmbient 
   const [time, setTime] = useState(0)
   const [drawer, setDrawer] = useState(false)
   const [editMode, setEditMode] = useState('workflow')
+  const [overloaded, setOverloaded] = useState(false)
 
   const wrapRef = useRef(null)
   const canvasRef = useRef(null)
@@ -30,12 +31,17 @@ export default function ExploreStudio({ state, setState, actionsRef, setAmbient 
   live.current.playing = playing
   useIdleCursor(wrapRef)
 
-  const compiled = useMemo(() => compile(formula, FIELD_VARS), [formula])
+  const compiled = useMemo(() => compile(formula, FIELD_VARS, PER_PIXEL), [formula])
   const lastGood = useRef(null)
   if (compiled.ok) lastGood.current = compiled.fn
   live.current.fn = lastGood.current
 
-  useEffect(() => { rendererRef.current = new FieldRenderer(canvasRef.current) }, [])
+  useEffect(() => {
+    rendererRef.current = new FieldRenderer(canvasRef.current)
+    rendererRef.current.onOverload = setOverloaded
+  }, [])
+  // an edited formula gets a fresh chance after being paused
+  useEffect(() => { rendererRef.current?.resetGuard() }, [formula])
 
   const first = useRef(true)
   useEffect(() => {
@@ -102,6 +108,7 @@ export default function ExploreStudio({ state, setState, actionsRef, setAmbient 
             <div className="canvas-stack fill">
               <canvas ref={canvasRef} className="smooth" aria-label={`${preset.name}, a living formula`} />
               <canvas ref={fadeRef} className="fade smooth" aria-hidden />
+              {overloaded && <div className="overload" role="status">This formula is too heavy to draw smoothly, so it's paused. Simplify it or pick another living formula.</div>}
             </div>
           </div>
         </main>

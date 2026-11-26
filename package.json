@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node --test src/engine/expr.test.js src/lang/draw.test.js src/workflow/tree.test.js src/art/art.test.js src/app/security.test.js src/engine/math.test.js"
+    "test": "node --test src/engine/expr.test.js src/lang/draw.test.js src/workflow/tree.test.js src/art/art.test.js src/app/security.test.js src/engine/math.test.js src/lang/review.test.js"
   },
   "dependencies": {
     "react": "18.3.1",

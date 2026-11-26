@@ -57,6 +57,7 @@ export const EXPLORE_PRESETS = [
   },
 ]
 
+const clock = () => (typeof performance !== "undefined" ? performance.now() : Date.now())
 const hex = (h) => { const n = parseInt(h.slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255] }
 
 export function buildLUT(stops) {
@@ -79,6 +80,7 @@ export class FieldRenderer {
   }
 
   configure({ kind, palette, map, bands }) {
+    this.resetGuard()
     const changed = kind !== this.kind
     this.kind = kind
     this.map = map
@@ -108,7 +110,31 @@ export class FieldRenderer {
     }
   }
 
+  // Frame-time guard (same rule as the art renderer): a formula too heavy to
+  // draw smoothly is paused, keeping the last picture, instead of freezing the page.
+  resetGuard() {
+    this.slow = 0
+    if (this.overloaded) { this.overloaded = false; this.onOverload?.(false) }
+  }
+
   frame(fn, t, amp) {
+    if (this.overloaded) return
+    const t0 = clock()
+    this._t0 = t0
+    this.draw(fn, t, amp)
+    if (this.overloaded) return
+    this.slow = clock() - t0 > 80 ? (this.slow ?? 0) + 1 : 0
+    if (this.slow >= 3) { this.overloaded = true; this.onOverload?.(true) }
+  }
+
+  tooSlow() {
+    if (clock() - this._t0 <= 250) return false
+    this.overloaded = true
+    this.onOverload?.(true)
+    return true
+  }
+
+  draw(fn, t, amp) {
     if (this.kind === 'flow') return this.flow(fn, t, amp)
     const { width: w, height: h } = this.canvas
     const d = this.img.data, lut = this.lut
@@ -119,6 +145,7 @@ export class FieldRenderer {
     const bg = hex(BACKGROUNDS.contour)
     let i = 0
     for (let py = 0; py < h; py++) {
+      if ((py & 7) === 0 && this.tooSlow()) return
       const y = (py / h) * 2 - 1
       for (let px = 0; px < w; px++) {
         const x = ((px / w) * 2 - 1) * aspect
@@ -161,6 +188,7 @@ export class FieldRenderer {
     const buckets = 12
     const paths = Array.from({ length: buckets }, () => new Path2D())
     for (let i = 0; i < this.particles.length; i++) {
+      if ((i & 255) === 0 && this.tooSlow()) return
       const p = this.particles[i]
       const x = ((p.x / W) * 2 - 1) * aspect, y = (p.y / H) * 2 - 1
       env.x = x; env.y = y; env.r = Math.sqrt(x * x + y * y); env.a = Math.atan2(y, x)

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { compile } from '../engine/expr.js'
+import { compile, PER_PIXEL } from '../engine/expr.js'
 import { FORMULAS, PRESETS, VAR_LABELS } from '../scene/formulas.js'
 import WorkflowEditor from '../workflow/WorkflowEditor.jsx'
 import { PALETTES } from '../scene/palettes.js'
@@ -27,7 +27,7 @@ export default function SceneWorkspace({ actionsRef, setAccent, setAmbient = () 
   const compiled = useMemo(() => {
     const out = {}
     for (const f of FORMULAS) {
-      const res = compile(sources[f.key], f.vars)
+      const res = compile(sources[f.key], f.vars, PER_PIXEL)
       if (res.ok) lastGood.current[f.key] = res.fn
       out[f.key] = res
     }

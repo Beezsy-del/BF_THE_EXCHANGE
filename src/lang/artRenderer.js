@@ -6,6 +6,11 @@
 
 import { hslToRgb } from './draw.js'
 
+const STILL = {} // no motion: every pixel at home, original colour
+const SLOW_MS = 80
+const HARD_MS = 250
+const clock = () => (typeof performance !== 'undefined' ? performance.now() : Date.now())
+
 function rgbToHsl(r, g, b) {
   r /= 255; g /= 255; b /= 255
   const max = Math.max(r, g, b), min = Math.min(r, g, b)
@@ -60,6 +65,9 @@ export class ArtRenderer {
   setArt(art) {
     const prev = this.art
     this.art = art
+    // a new artwork or motion gets a fresh chance
+    this.slow = 0
+    if (this.overloaded) { this.overloaded = false; this.onOverload?.(false) }
     const P = art.pixels
     const n = P.length
     // per-pixel animation props: layer-specific override the "*" defaults
@@ -103,9 +111,22 @@ export class ArtRenderer {
     }
   }
 
+  // Frame-time guard: a motion that makes frames slow (one frame over 250 ms,
+  // or three in a row over 80 ms) is paused and the art shown still, so a heavy
+  // formula — typed, evolved or loaded from a file — can never freeze the page.
+  guard(i) {
+    if (this.overloaded || (i & 1023) !== 0) return
+    if (clock() - this._t0 > HARD_MS) this.trip()
+  }
+
+  trip() {
+    this.overloaded = true
+    this.onOverload?.(true)
+  }
+
   // Evaluate animation for item i at time t -> [tx, ty, r, g, b]
   evaluate(it, env, out) {
-    const A = it.anim
+    const A = this.overloaded ? STILL : it.anim
     env.x = it.x; env.y = it.y; env.seed = it.seed; env.cx = it.cx; env.cy = it.cy
     const ddx = it.x - it.cx, ddy = it.y - it.cy
     env.r = Math.sqrt(ddx * ddx + ddy * ddy); env.a = Math.atan2(ddy, ddx)
@@ -123,6 +144,14 @@ export class ArtRenderer {
   }
 
   frame(t, dt, opts) {
+    this._t0 = clock()
+    this.draw(t, dt, opts)
+    if (this.overloaded) return
+    this.slow = clock() - this._t0 > SLOW_MS ? (this.slow ?? 0) + 1 : 0
+    if (this.slow >= 3) this.trip()
+  }
+
+  draw(t, dt, opts) {
     const art = this.art
     if (!art) return
     const env = { t, amp: opts.amp, mx: opts.mx, my: opts.my, W: art.width, H: art.height, x: 0, y: 0, seed: 0, cx: 0, cy: 0, r: 0, a: 0 }
@@ -132,7 +161,9 @@ export class ArtRenderer {
     if (this.mode === 'pixels') {
       const w = art.width, h = art.height, d = this.img.data
       for (let i = 0; i < d.length; i += 4) { d[i] = br; d[i + 1] = bgc; d[i + 2] = bb; d[i + 3] = 255 }
-      for (const it of this.items) {
+      for (let n = 0; n < this.items.length; n++) {
+        const it = this.items[n]
+        this.guard(n)
         this.evaluate(it, env, out)
         const x = Math.round(out[0]), y = Math.round(out[1])
         if (x < 0 || y < 0 || x >= w || y >= h) continue
@@ -154,6 +185,7 @@ export class ArtRenderer {
     const glow = []
     for (let i = 0; i < this.n; i++) {
       const it = this.items[i]
+      this.guard(i)
       this.evaluate(it, env, out)
       // spring toward the formula's target, with damping
       let ax = (out[0] - this.px[i]) * 0.09, ay = (out[1] - this.py[i]) * 0.09

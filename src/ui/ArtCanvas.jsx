@@ -7,8 +7,10 @@ import { useIdleCursor } from './useIdleCursor.js'
 // `motionFx` ({dx, dy, hue, bright} functions) when given. Sliders glide,
 // motion changes blend, and new artwork dissolves in.
 const ArtCanvas = forwardRef(function ArtCanvas(
-  { art, motionFx = null, mode = 'pixels', opts, playing = true, onTime, interactive = true, label = 'Artwork' }, ref,
+  { art, motionFx = null, mode = 'pixels', opts, playing = true, onTime, onOverload, interactive = true, label = 'Artwork' }, ref,
 ) {
+  const overloadRef = useRef(onOverload)
+  overloadRef.current = onOverload
   const wrapRef = useRef(null)
   const stackRef = useRef(null)
   const canvasRef = useRef(null)
@@ -53,6 +55,7 @@ const ArtCanvas = forwardRef(function ArtCanvas(
   useEffect(() => {
     rendererRef.current = new ArtRenderer(canvasRef.current)
     rendererRef.current.setMode(mode)
+    rendererRef.current.onOverload = (v) => overloadRef.current?.(v)
   }, [])
 
   // new artwork: dissolve (pixels) or let particles fly to their new places

@@ -63,12 +63,16 @@ export const FUNCTION_NAMES = Object.keys(FUNCS)
 export const MAX_EXPR_LENGTH = 4000
 const MAX_TOKENS = 1200
 const MAX_DEPTH = 64
+// Formulas that run once per pixel per frame (motions, fields, scene behaviours,
+// ANIMATE blocks) get a much smaller budget, so one formula can never make a
+// frame take seconds.
+export const PER_PIXEL = { maxTokens: 240 }
 
 // Own-property lookups only, so names like "constructor" or "__proto__"
 // can never reach Object.prototype.
 const own = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key)
 
-function tokenize(src) {
+function tokenize(src, maxTokens = MAX_TOKENS) {
   const tokens = []
   let i = 0
   while (i < src.length) {
@@ -99,7 +103,7 @@ function tokenize(src) {
     }
     throw err(`Unexpected character "${c}"`, i)
   }
-  if (tokens.length > MAX_TOKENS) throw err(`Formula is too long (over ${MAX_TOKENS} parts)`, 0)
+  if (tokens.length > maxTokens) throw err(`Formula is too long (over ${maxTokens} parts)`, 0)
   tokens.push({ type: 'end', pos: src.length })
   return tokens
 }
@@ -243,19 +247,19 @@ function collectVars(node, out = new Set()) {
   return out
 }
 
-export function parseExpr(src, allowed = ['x', 'y', 't']) {
+export function parseExpr(src, allowed = ["x", "y", "t"], { maxTokens = MAX_TOKENS } = {}) {
   const text = String(src ?? '').trim()
   if (!text) return { ok: false, error: 'Expression is empty', pos: 0 }
   if (text.length > MAX_EXPR_LENGTH) return { ok: false, error: `Formula is too long (over ${MAX_EXPR_LENGTH} characters)`, pos: MAX_EXPR_LENGTH }
   try {
-    return { ok: true, ast: parse(tokenize(text), allowed) }
+    return { ok: true, ast: parse(tokenize(text, maxTokens), allowed) }
   } catch (e) {
     return { ok: false, error: e instanceof RangeError ? 'Formula is too complex' : e.message, pos: e.pos ?? 0 }
   }
 }
 
-export function compile(src, allowed = ['x', 'y', 't']) {
-  const res = parseExpr(src, allowed)
+export function compile(src, allowed = ["x", "y", "t"], opts = {}) {
+  const res = parseExpr(src, allowed, opts)
   if (!res.ok) return res
   try {
     return { ok: true, fn: compileAst(res.ast), ast: res.ast, used: [...collectVars(res.ast)] }

@@ -9,7 +9,7 @@
 //
 // run(source) -> { ok, art, error? }   art = { width, height, background, pixels, layers, animations }
 
-import { compile } from '../engine/expr.js'
+import { compile, PER_PIXEL } from "../engine/expr.js"
 
 export const MAX_W = 320
 export const MAX_H = 180
@@ -73,14 +73,24 @@ function suggest(word) {
 }
 
 // A single line may hold several commands ("PAINT 20  TURN RIGHT"):
-// split wherever a known command word starts.
-function splitCommands(piece) {
+// split wherever a known command word starts — but never inside brackets,
+// right after LAYER / AS / ANIMATE (that word is a name), or when the word is
+// a name the program declared earlier (REPEAT 4 AS step … MOVE step 1).
+const NAME_SLOTS = new Set(['LAYER', 'AS', 'ANIMATE'])
+function splitCommands(piece, names) {
   const words = piece.text.split(/\s+/)
   const stmts = []
   let cur = null
+  let depth = 0
+  let prevUp = ''
   for (const w of words) {
     const up = w.toUpperCase()
-    if (COMMANDS.includes(up)) {
+    const isName = NAME_SLOTS.has(prevUp) || names.has(w)
+    if (NAME_SLOTS.has(prevUp)) names.add(w)
+    const isCommand = depth === 0 && !isName && COMMANDS.includes(up)
+    for (const ch of w) depth = Math.max(0, depth + (ch === '(' ? 1 : ch === ')' ? -1 : 0))
+    prevUp = up
+    if (isCommand) {
       cur = { cmd: up, args: [], line: piece.line }
       stmts.push(cur)
     } else {
@@ -97,14 +107,18 @@ function splitCommands(piece) {
   return stmts
 }
 
-function parseBlock(ps, i, closeLine, depth = 0) {
+function parseBlock(ps, i, closeLine, depth = 0, names = new Set()) {
   if (depth > MAX_NESTING) throw new LangError(`Blocks are nested too deeply (the limit is ${MAX_NESTING})`, closeLine ?? 0)
   const stmts = []
   while (i < ps.length) {
     const p = ps[i]
-    if (p.text === '}') return [stmts, i + 1]
+    if (p.text === '}') {
+      // a "}" at the top level has nothing to close — say so instead of silently stopping
+      if (closeLine === undefined) throw new LangError('Unexpected "}" — there is no block here to close', p.line)
+      return [stmts, i + 1]
+    }
     if (p.text === '{') throw new LangError('Unexpected "{" — blocks follow REPEAT, IF or ANIMATE', p.line)
-    const cmds = splitCommands(p)
+    const cmds = splitCommands(p, names)
     i++
     for (const s of cmds) stmts.push(s)
     const last = cmds[cmds.length - 1]
@@ -119,7 +133,7 @@ function parseBlock(ps, i, closeLine, depth = 0) {
         last.body = body
         i++
       } else {
-        const [inner, ni] = parseBlock(ps, i + 1, last.line, depth + 1)
+        const [inner, ni] = parseBlock(ps, i + 1, last.line, depth + 1, names)
         last.block = inner
         i = ni
       }
@@ -129,23 +143,38 @@ function parseBlock(ps, i, closeLine, depth = 0) {
   return [stmts, i]
 }
 
-// Join argument words into expressions: "32 + 10*cos(i) 20" -> ["32+10*cos(i)", "20"].
+// Join argument words into expressions:
+//   "32 + 10*cos(i) 20"   -> ["32+10*cos(i)", "20"]
+//   "max(10, 20) 5"       -> ["max(10, 20)", "5"]   (commas inside brackets belong to the call)
+//   "3, 4"                -> ["3", "4"]             (a comma outside brackets separates values)
 const OPS = '+-*/^%<>='
 function joinArgs(words) {
-  const args = []
-  let depth = 0
-  for (const w of words.flatMap((x) => x.split(',').map((s, k, a) => (k < a.length - 1 ? s + ',' : s))).filter(Boolean)) {
-    const word = w.endsWith(',') ? w.slice(0, -1) : w
-    const prev = args[args.length - 1]
-    const continues =
-      prev !== undefined && !prev.closed &&
-      (depth > 0 || OPS.includes(prev.text.slice(-1)) || (OPS.includes(word[0]) && (word.length === 1 || word[0] !== '-')))
-    if (continues) prev.text += word
-    else args.push({ text: word, closed: false })
-    for (const ch of word) depth += ch === '(' ? 1 : ch === ')' ? -1 : 0
-    if (w.endsWith(',') && depth === 0) args[args.length - 1].closed = true
+  const text = words.join(' ')
+  // 1. cut at spaces and commas that are outside brackets; keep everything inside brackets
+  const chunks = []
+  let cur = '', depth = 0, afterComma = false
+  const cut = () => {
+    if (cur) { chunks.push({ text: cur, afterComma }); afterComma = false }
+    cur = ''
   }
-  return args.map((a) => a.text).filter((t) => t.length)
+  for (const ch of text) {
+    if (ch === '(') depth++
+    if (ch === ')') depth = Math.max(0, depth - 1)
+    if (depth === 0 && /\s/.test(ch)) { cut(); continue }
+    if (depth === 0 && ch === ',') { cut(); afterComma = true; continue }
+    cur += ch
+  }
+  cut()
+  // 2. glue chunks joined by an operator ("32", "+", "10*cos(i)") into one value
+  const args = []
+  for (const c of chunks) {
+    const prev = args[args.length - 1]
+    const glue = prev !== undefined && !c.afterComma &&
+      (OPS.includes(prev.slice(-1)) || (OPS.includes(c.text[0]) && (c.text.length === 1 || c.text[0] !== '-')))
+    if (glue) args[args.length - 1] += c.text
+    else args.push(c.text)
+  }
+  return args
 }
 
 // ---------- colours ----------
@@ -182,6 +211,12 @@ const MAX_DISTANCE = 4000 // longest single PAINT / STEP / LINE
 const MAX_SHAPE = 1000 // largest RECT side or CIRCLE / RING radius
 const MAX_WORK = 4000000 // total cells any program may visit
 const MAX_NESTING = 48
+// Any program stops after half a second, so typing can never lock the page —
+// even a short program full of heavy maths.
+const MAX_RUN_MS = 500
+const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now())
+// Loop names that would clash with names the maths already knows.
+const RESERVED_NAMES = ['x', 'y', 'W', 'H', 'cx', 'cy', 't', 'time', 'pi', 'tau', 'e']
 
 export function run(source) {
   const src = String(source ?? '')
@@ -248,9 +283,19 @@ function execute(source) {
   // Every loop that visits cells pays for them up front, so no single command
   // (even one that paints nothing, like STEP or an off-canvas RING) can hang the page.
   let work = 0
+  const started = now()
+  const overTime = (line) => {
+    if (now() - started > MAX_RUN_MS) throw new LangError(`The program took longer than ${MAX_RUN_MS} ms and was stopped — try fewer repeats or simpler maths`, line)
+  }
   const charge = (cells, line) => {
     work += cells
     if (work > MAX_WORK) throw new LangError('Too much work — the program was stopped to keep things fast', line)
+    if (cells > 2048) overTime(line)
+  }
+  // one statement or loop pass; every 1,024 steps also checks the clock
+  const step = (line) => {
+    if (++st.ops > MAX_OPS) throw new LangError(`Stopped after ${MAX_OPS.toLocaleString()} steps — is a REPEAT too large?`, line)
+    if ((st.ops & 1023) === 0) overTime(line)
   }
   const limit = (v, max, what, line) => {
     if (Math.abs(v) > max) throw new LangError(`${what} is too large (the limit is ${max.toLocaleString()})`, line)
@@ -272,9 +317,14 @@ function execute(source) {
     if (Math.abs(st.y - Math.round(st.y)) < 1e-6) st.y = Math.round(st.y)
   }
 
+  // [from, to] offsets of a shape, trimmed to the cells that can land on a canvas of `size`
+  const clip = (from, to, origin, size) => [Math.max(from, Math.floor(-origin) - 1), Math.min(to, Math.ceil(size - origin) + 1)]
+
+  const DRAWS = new Set(['MOVE', 'PAINT', 'STEP', 'DOT', 'LINE', 'RECT', 'CIRCLE', 'RING'])
   const exec = (stmts, scope) => {
     for (const s of stmts) {
-      if (++st.ops > MAX_OPS) throw new LangError(`Stopped after ${MAX_OPS.toLocaleString()} steps — is a REPEAT too large?`, s.line)
+      step(s.line)
+      if (DRAWS.has(s.cmd)) ensureGrid() // the pen starts at the centre, even for a first DOT
       const env = { ...scope, x: st.x, y: st.y, W: st.w, H: st.h, cx: st.w / 2, cy: st.h / 2 }
       switch (s.cmd) {
         case 'CANVAS': {
@@ -339,8 +389,11 @@ function execute(source) {
           ensureGrid()
           limit(w, MAX_SHAPE, 'RECT width', s.line)
           limit(h, MAX_SHAPE, 'RECT height', s.line)
-          charge(Math.max(0, Math.round(w)) * Math.max(0, Math.round(h)), s.line)
-          for (let j = 0; j < Math.round(h); j++) for (let i = 0; i < Math.round(w); i++) plot(st.x + i, st.y + j, s.line)
+          // only visit the part of the shape that lands on the canvas
+          const [i0, i1] = clip(0, Math.round(w) - 1, st.x, st.w)
+          const [j0, j1] = clip(0, Math.round(h) - 1, st.y, st.h)
+          charge(Math.max(0, i1 - i0 + 1) * Math.max(0, j1 - j0 + 1), s.line)
+          for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) plot(st.x + i, st.y + j, s.line)
           break
         }
         case 'CIRCLE':
@@ -349,9 +402,11 @@ function execute(source) {
           ensureGrid()
           limit(r, MAX_SHAPE, `${s.cmd} radius`, s.line)
           const R = Math.ceil(r)
-          charge((2 * R + 1) ** 2, s.line)
-          for (let j = -R; j <= R; j++) {
-            for (let i = -R; i <= R; i++) {
+          const [i0, i1] = clip(-R, R, st.x, st.w)
+          const [j0, j1] = clip(-R, R, st.y, st.h)
+          charge(Math.max(0, i1 - i0 + 1) * Math.max(0, j1 - j0 + 1), s.line)
+          for (let j = j0; j <= j1; j++) {
+            for (let i = i0; i <= i1; i++) {
               const d = Math.hypot(i, j)
               if (s.cmd === 'CIRCLE' ? d <= r + 0.3 : Math.abs(d - r) < 0.6) plot(st.x + i, st.y + j, s.line)
             }
@@ -365,15 +420,15 @@ function execute(source) {
           if (asIdx >= 0) {
             varName = words[asIdx + 1]
             if (!varName || !/^[a-z][a-z0-9_]{0,23}$/i.test(varName)) throw new LangError('Write REPEAT n AS i, with a simple name like i', s.line)
-            if (['x', 'y', 'W', 'H', 'cx', 'cy'].includes(varName)) throw new LangError(`"${varName}" is reserved — pick another loop name`, s.line)
+            // names the maths already uses (pi, tau, e, time = t) would silently win over the loop value
+            if (RESERVED_NAMES.includes(varName)) throw new LangError(`"${varName}" is reserved — pick another loop name`, s.line)
             words = words.slice(0, asIdx)
           }
           const [n] = nums({ ...s, args: words }, env, 1, 1)
           const count = Math.floor(n)
           if (count < 0) throw new LangError('REPEAT count cannot be negative', s.line)
           for (let k = 0; k < count; k++) {
-            // each pass costs a step even when the block is empty
-            if (++st.ops > MAX_OPS) throw new LangError(`Stopped after ${MAX_OPS.toLocaleString()} steps — is a REPEAT too large?`, s.line)
+            step(s.line) // each pass costs a step even when the block is empty
             exec(s.block, varName ? { ...scope, [varName]: k } : scope)
           }
           break
@@ -392,7 +447,7 @@ function execute(source) {
             if (!m) throw new LangError('Inside ANIMATE write lines like: dx = 2 * sin(t)', p.line)
             const prop = m[1].toLowerCase()
             if (!ANIM_PROPS.includes(prop)) throw new LangError(`"${m[1]}" can't be animated — use ${ANIM_PROPS.join(', ')}`, p.line)
-            const c = compile(m[2], ANIM_VARS)
+            const c = compile(m[2], ANIM_VARS, PER_PIXEL)
             if (!c.ok) throw new LangError(`${prop}: ${c.error}`, p.line)
             props[prop] = { fn: c.fn, src: m[2] }
           }

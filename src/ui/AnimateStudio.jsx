@@ -4,7 +4,7 @@ import Slider from './Slider.jsx'
 import Transport from './Transport.jsx'
 import FormulaRow from './FormulaRow.jsx'
 import WorkflowEditor from '../workflow/WorkflowEditor.jsx'
-import { compile } from '../engine/expr.js'
+import { compile, PER_PIXEL } from '../engine/expr.js'
 import { MOTIONS, MOTION_PROPS, MOTION_VARS, MOTION_VAR_LABELS, motionByKey } from '../animate/motions.js'
 import { evolve } from '../animate/evolve.js'
 
@@ -16,7 +16,7 @@ function toFx(src) {
   for (const p of MOTION_PROPS) {
     const s = (src[p.key] ?? p.neutral).trim()
     if (s === p.neutral) continue
-    const r = compile(s, MOTION_VARS)
+    const r = compile(s, MOTION_VARS, PER_PIXEL)
     if (r.ok) fx[p.key] = r.fn
   }
   return fx
@@ -57,6 +57,7 @@ export default function AnimateStudio({ artwork, motion, setMotion, actionsRef, 
   const [editMode, setEditMode] = useState('workflow')
   const [prop, setProp] = useState('dx')
   const [variants, setVariants] = useState(null)
+  const [overloaded, setOverloaded] = useState(false)
   const canvasRef = useRef(null)
 
   // formula sources for the selected motion (user edits override the preset)
@@ -70,7 +71,7 @@ export default function AnimateStudio({ artwork, motion, setMotion, actionsRef, 
     if (!sources) return null
     const out = {}
     for (const p of MOTION_PROPS) {
-      const r = compile(sources[p.key], MOTION_VARS)
+      const r = compile(sources[p.key], MOTION_VARS, PER_PIXEL)
       if (r.ok) lastGood.current[p.key] = r.fn
       out[p.key] = r
     }
@@ -153,8 +154,9 @@ export default function AnimateStudio({ artwork, motion, setMotion, actionsRef, 
         </aside>
 
         <main className="stage-wrap">
-          <ArtCanvas ref={canvasRef} art={art} motionFx={motionFx} mode={mode} opts={opts} playing={playing} onTime={setTime}
+          <ArtCanvas ref={canvasRef} art={art} motionFx={motionFx} mode={mode} opts={opts} playing={playing} onTime={setTime} onOverload={setOverloaded}
             label={`${artwork.name ?? 'Artwork'}, animated`} />
+          {overloaded && <div className="overload" role="status">This motion is too heavy to run smoothly, so it's paused. Simplify the formula or pick another way to animate.</div>}
         </main>
 
         <aside className="inspector">
