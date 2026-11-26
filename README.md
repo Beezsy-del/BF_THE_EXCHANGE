@@ -6,7 +6,7 @@
 - BF
 
 ### Track Number & Name
-- Track _(number to be filled in)_ — Pixels on Command × Sorcery (two tracks combined, as permitted)
+- Track 3 — Tiny Languages and Playground
 
 ### Problem Statement Name
 - Pixels on Command + Sorcery
